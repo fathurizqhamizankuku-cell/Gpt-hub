@@ -1,0 +1,781 @@
+
+--====================================================
+-- GPT HUB | UNIVERSAL AIM ASSIST
+-- RAYFIELD EDITION
+--====================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+--====================================================
+-- SETTINGS
+--====================================================
+
+local S = {
+    NPCAim = false,
+    PlayerAim = false,
+    AimStrength = 50,
+    AimRange = 500,
+    FOV = 300,
+    WallCheck = true,
+    SmoothCamera = true,
+
+    BoxESP = false,
+    HealthESP = false,
+    OutlineESP = false,
+    TracerESP = false,
+    ESPColor = Color3.fromRGB(0, 200, 255),
+
+    Noclip = false,
+    Fly = false,
+    FlySpeed = 60,
+    WalkSpeed = 16
+}
+
+local Character
+local Humanoid
+local Root
+
+local function setupCharacter(char)
+    Character = char
+    Humanoid = char:WaitForChild("Humanoid")
+    Root = char:WaitForChild("HumanoidRootPart")
+    Humanoid.WalkSpeed = S.WalkSpeed
+end
+
+if Player.Character then
+    task.spawn(setupCharacter, Player.Character)
+end
+
+Player.CharacterAdded:Connect(setupCharacter)
+
+--====================================================
+-- RAYFIELD
+--====================================================
+
+local Rayfield = loadstring(game:HttpGet(
+    "https://sirius.menu/rayfield"
+))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "GPT HUB | UNIVERSAL AIM ASSIST",
+    LoadingTitle = "GPT HUB",
+    LoadingSubtitle = "Universal Aim Assist",
+    ConfigurationSaving = {
+        Enabled = false
+    },
+    KeySystem = false
+})
+
+local AimTab = Window:CreateTab("Aimbot", 4483362458)
+local ESPTab = Window:CreateTab("ESP", 4483362458)
+local MoveTab = Window:CreateTab("Movement", 4483362458)
+local SettingsTab = Window:CreateTab("Settings", 4483362458)
+
+--====================================================
+-- AIM HELPERS
+--====================================================
+
+local function getHumanoid(model)
+    return model:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot(model)
+    return model:FindFirstChild("HumanoidRootPart")
+        or model:FindFirstChild("UpperTorso")
+        or model:FindFirstChild("Torso")
+end
+
+local function canSee(model)
+    if not S.WallCheck then return true end
+
+    local root = getRoot(model)
+    if not root then return false end
+
+    local camera = Workspace.CurrentCamera
+    local params = RaycastParams.new()
+
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {Character}
+
+    local origin = camera.CFrame.Position
+    local result = Workspace:Raycast(
+        origin,
+        root.Position - origin,
+        params
+    )
+
+    return result == nil or result.Instance:IsDescendantOf(model)
+end
+
+local function findTarget(wantPlayers)
+    local camera = Workspace.CurrentCamera
+    local center = camera.ViewportSize / 2
+
+    local best
+    local bestDistance = S.FOV
+
+    for _, model in ipairs(Workspace:GetDescendants()) do
+        if model:IsA("Model") and model ~= Character then
+            local hum = getHumanoid(model)
+            local root = getRoot(model)
+            local targetPlayer = Players:GetPlayerFromCharacter(model)
+
+            local isPlayer = targetPlayer ~= nil
+            local allowed
+
+            if wantPlayers then
+                allowed = isPlayer and targetPlayer ~= Player
+            else
+                allowed = not isPlayer
+            end
+
+            if allowed and hum and hum.Health > 0 and root then
+                local distance =
+                    (root.Position - camera.CFrame.Position).Magnitude
+
+                if distance <= S.AimRange and canSee(model) then
+                    local point, onScreen =
+                        camera:WorldToViewportPoint(root.Position)
+
+                    if onScreen then
+                        local screenDistance = (
+                            Vector2.new(point.X, point.Y) - center
+                        ).Magnitude
+
+                        if screenDistance < bestDistance then
+                            bestDistance = screenDistance
+                            best = model
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return best
+end
+
+--====================================================
+-- AIM TAB
+--====================================================
+
+AimTab:CreateSection("Target")
+
+AimTab:CreateToggle({
+    Name = "NPC Aim Assist",
+    CurrentValue = false,
+    Callback = function(value)
+        S.NPCAim = value
+        if value then S.PlayerAim = false end
+    end
+})
+
+AimTab:CreateToggle({
+    Name = "Player Aim Assist",
+    CurrentValue = false,
+    Callback = function(value)
+        S.PlayerAim = value
+        if value then S.NPCAim = false end
+    end
+})
+
+AimTab:CreateToggle({
+    Name = "Wallcheck",
+    CurrentValue = true,
+    Callback = function(value)
+        S.WallCheck = value
+    end
+})
+
+AimTab:CreateSection("Aim Configuration")
+
+AimTab:CreateSlider({
+    Name = "Aim Strength",
+    Range = {1, 100},
+    Increment = 1,
+    CurrentValue = 50,
+    Callback = function(value)
+        S.AimStrength = value
+    end
+})
+
+AimTab:CreateSlider({
+    Name = "Aim Assist Range",
+    Range = {50, 1500},
+    Increment = 25,
+    CurrentValue = 500,
+    Callback = function(value)
+        S.AimRange = value
+    end
+})
+
+AimTab:CreateSlider({
+    Name = "FOV",
+    Range = {50, 1000},
+    Increment = 10,
+    CurrentValue = 300,
+    Callback = function(value)
+        S.FOV = value
+    end
+})
+
+--====================================================
+-- ESP SYSTEM
+--====================================================
+
+local ESPGui = Instance.new("ScreenGui")
+ESPGui.Name = "GPT_ESP"
+ESPGui.ResetOnSpawn = false
+ESPGui.IgnoreGuiInset = true
+ESPGui.DisplayOrder = 10
+ESPGui.Parent = PlayerGui
+
+local ESPObjects = {}
+
+local function createLine(parent)
+    local line = Instance.new("Frame")
+    line.BorderSizePixel = 0
+    line.AnchorPoint = Vector2.new(0.5, 0.5)
+    line.Parent = parent
+    return line
+end
+
+local function createESP(model)
+    if ESPObjects[model] then return end
+
+    local folder = Instance.new("Frame")
+    folder.BackgroundTransparency = 1
+    folder.Size = UDim2.fromScale(1, 1)
+    folder.Parent = ESPGui
+
+    local box = Instance.new("Frame")
+    box.BackgroundTransparency = 1
+    box.BorderSizePixel = 0
+    box.Parent = folder
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Parent = box
+
+    local healthBack = Instance.new("Frame")
+    healthBack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    healthBack.BorderSizePixel = 0
+    healthBack.Parent = folder
+
+    local health = Instance.new("Frame")
+    health.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    health.BorderSizePixel = 0
+    health.AnchorPoint = Vector2.new(0, 1)
+    health.Position = UDim2.new(0, 0, 1, 0)
+    health.Parent = healthBack
+
+    local tracer = createLine(folder)
+
+    local highlight = Instance.new("Highlight")
+    highlight.FillTransparency = 1
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Enabled = false
+    highlight.Parent = model
+
+    ESPObjects[model] = {
+        Folder = folder,
+        Box = box,
+        Stroke = stroke,
+        HealthBack = healthBack,
+        Health = health,
+        Tracer = tracer,
+        Highlight = highlight
+    }
+end
+
+local function removeESP(model)
+    local data = ESPObjects[model]
+    if not data then return end
+
+    data.Folder:Destroy()
+    data.Highlight:Destroy()
+    ESPObjects[model] = nil
+end
+
+local function updateESP(model, data)
+    local hum = getHumanoid(model)
+    local root = getRoot(model)
+
+    if not hum or not root or hum.Health <= 0 then
+        data.Folder.Visible = false
+        return
+    end
+
+    local camera = Workspace.CurrentCamera
+    local cf, size = model:GetBoundingBox()
+
+    local top = camera:WorldToViewportPoint(
+        cf.Position + Vector3.new(0, size.Y / 2, 0)
+    )
+
+    local bottom = camera:WorldToViewportPoint(
+        cf.Position - Vector3.new(0, size.Y / 2, 0)
+    )
+
+    local visible = top.Z > 0 and bottom.Z > 0
+    data.Folder.Visible = visible
+
+    if not visible then return end
+
+    local height = math.abs(bottom.Y - top.Y)
+    local width = math.max(height * 0.48, 4)
+    local x = top.X - width / 2
+    local y = math.min(top.Y, bottom.Y)
+
+    -- 2D BOX
+    data.Box.Visible = S.BoxESP
+    data.Box.Position = UDim2.fromOffset(x, y)
+    data.Box.Size = UDim2.fromOffset(width, height)
+    data.Stroke.Color = S.ESPColor
+
+    -- HEALTH
+    data.HealthBack.Visible = S.HealthESP
+    data.HealthBack.Position = UDim2.fromOffset(x - 7, y)
+    data.HealthBack.Size = UDim2.fromOffset(4, height)
+
+    data.Health.Size = UDim2.new(
+        1, 0,
+        math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1),
+        0
+    )
+
+    -- TRACER
+    data.Tracer.Visible = S.TracerESP
+
+    if S.TracerESP then
+        local startPoint = Vector2.new(
+            camera.ViewportSize.X / 2,
+            camera.ViewportSize.Y
+        )
+
+        local endPoint = Vector2.new(top.X, bottom.Y)
+        local delta = endPoint - startPoint
+
+        data.Tracer.Position = UDim2.fromOffset(
+            (startPoint.X + endPoint.X) / 2,
+            (startPoint.Y + endPoint.Y) / 2
+        )
+
+        data.Tracer.Size = UDim2.fromOffset(delta.Magnitude, 2)
+        data.Tracer.Rotation =
+            math.deg(math.atan2(delta.Y, delta.X))
+
+        data.Tracer.BackgroundColor3 = S.ESPColor
+    end
+
+    data.Highlight.Enabled = S.OutlineESP
+    data.Highlight.OutlineColor = S.ESPColor
+end
+
+--====================================================
+-- ESP TAB
+--====================================================
+
+ESPTab:CreateSection("Visual ESP")
+
+ESPTab:CreateToggle({
+    Name = "2D Box ESP",
+    CurrentValue = false,
+    Callback = function(value)
+        S.BoxESP = value
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Health ESP",
+    CurrentValue = false,
+    Callback = function(value)
+        S.HealthESP = value
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Outline ESP",
+    CurrentValue = false,
+    Callback = function(value)
+        S.OutlineESP = value
+    end
+})
+
+ESPTab:CreateToggle({
+    Name = "Tracer ESP",
+    CurrentValue = false,
+    Callback = function(value)
+        S.TracerESP = value
+    end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "ESP Color",
+    Color = S.ESPColor,
+    Callback = function(value)
+        S.ESPColor = value
+    end
+})
+
+--====================================================
+-- MOVEMENT SYSTEM
+--====================================================
+
+local savedCollision = {}
+local noclipConnection
+local flyConnection
+local bodyVelocity
+local bodyGyro
+
+local flyUp = false
+local flyDown = false
+
+local function setNoclip(value)
+    S.Noclip = value
+
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+
+    if not value then
+        for part, original in pairs(savedCollision) do
+            if part and part.Parent then
+                part.CanCollide = original
+            end
+        end
+
+        table.clear(savedCollision)
+        return
+    end
+
+    noclipConnection = RunService.Stepped:Connect(function()
+        local char = Player.Character
+        if not char then return end
+
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                if savedCollision[part] == nil then
+                    savedCollision[part] = part.CanCollide
+                end
+
+                part.CanCollide = false
+            end
+        end
+    end)
+end
+
+local function stopFly()
+    S.Fly = false
+
+    if flyConnection then
+        flyConnection:Disconnect()
+        flyConnection = nil
+    end
+
+    if bodyVelocity then
+        bodyVelocity:Destroy()
+        bodyVelocity = nil
+    end
+
+    if bodyGyro then
+        bodyGyro:Destroy()
+        bodyGyro = nil
+    end
+
+    if Humanoid then
+        Humanoid.PlatformStand = false
+        Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+end
+
+local function startFly()
+    stopFly()
+
+    if not Root or not Humanoid then return end
+
+    S.Fly = true
+
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+    bodyVelocity.Velocity = Vector3.zero
+    bodyVelocity.Parent = Root
+
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
+    bodyGyro.P = 9000
+    bodyGyro.Parent = Root
+
+    Humanoid.PlatformStand = true
+
+    flyConnection = RunService.RenderStepped:Connect(function()
+        if not Root or not Root.Parent then
+            stopFly()
+            return
+        end
+
+        local camera = Workspace.CurrentCamera
+        local direction = Humanoid.MoveDirection
+
+        local vertical = (flyUp and 1 or 0) -
+            (flyDown and 1 or 0)
+
+        bodyVelocity.Velocity =
+            direction * S.FlySpeed +
+            Vector3.new(0, vertical * S.FlySpeed, 0)
+
+        bodyGyro.CFrame = camera.CFrame
+    end)
+end
+
+MoveTab:CreateSection("Movement")
+
+MoveTab:CreateToggle({
+    Name = "Noclip",
+    CurrentValue = false,
+    Callback = setNoclip
+})
+
+MoveTab:CreateToggle({
+    Name = "Fly",
+    CurrentValue = false,
+    Callback = function(value)
+        if value then
+            startFly()
+        else
+            stopFly()
+        end
+    end
+})
+
+MoveTab:CreateSlider({
+    Name = "Fly Speed",
+    Range = {10, 250},
+    Increment = 5,
+    CurrentValue = 60,
+    Callback = function(value)
+        S.FlySpeed = value
+    end
+})
+
+MoveTab:CreateSlider({
+    Name = "Walk Speed",
+    Range = {8, 150},
+    Increment = 1,
+    CurrentValue = 16,
+    Callback = function(value)
+        S.WalkSpeed = value
+
+        if Humanoid then
+            Humanoid.WalkSpeed = value
+        end
+    end
+})
+
+--====================================================
+-- MOBILE FLY CONTROLS
+--====================================================
+
+local FlyGui = Instance.new("ScreenGui")
+FlyGui.Name = "GPT_Fly_Controls"
+FlyGui.ResetOnSpawn = false
+FlyGui.Parent = PlayerGui
+
+local function createFlyButton(name, text, position, callback)
+    local button = Instance.new("TextButton")
+    button.Name = name
+    button.Text = text
+    button.Size = UDim2.fromOffset(65, 48)
+    button.Position = position
+    button.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.TextSize = 15
+    button.Font = Enum.Font.GothamBold
+    button.Parent = FlyGui
+
+    Instance.new("UICorner", button).CornerRadius =
+        UDim.new(0, 9)
+
+    button.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch
+            or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            callback(true)
+        end
+    end)
+
+    button.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch
+            or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            callback(false)
+        end
+    end)
+
+    return button
+end
+
+local UpButton = createFlyButton(
+    "FlyUp", "UP",
+    UDim2.new(1, -155, 1, -160),
+    function(value) flyUp = value end
+)
+
+local DownButton = createFlyButton(
+    "FlyDown", "DOWN",
+    UDim2.new(1, -155, 1, -105),
+    function(value) flyDown = value end
+)
+
+UpButton.Visible = false
+DownButton.Visible = false
+
+--====================================================
+-- SETTINGS TAB
+--====================================================
+
+SettingsTab:CreateSection("Camera")
+
+SettingsTab:CreateToggle({
+    Name = "Smooth Camera",
+    CurrentValue = true,
+    Callback = function(value)
+        S.SmoothCamera = value
+    end
+})
+
+--====================================================
+-- MODEL SCAN
+--====================================================
+
+local scanTimer = 0
+
+local function scanESP()
+    local models = {}
+
+    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        if otherPlayer ~= Player and otherPlayer.Character then
+            table.insert(models, otherPlayer.Character)
+        end
+    end
+
+    for _, model in ipairs(Workspace:GetDescendants()) do
+        if model:IsA("Model")
+            and model ~= Character
+            and not Players:GetPlayerFromCharacter(model) then
+
+            local hum = getHumanoid(model)
+            local root = getRoot(model)
+
+            if hum and root and hum.Health > 0 then
+                table.insert(models, model)
+            end
+        end
+    end
+
+    for _, model in ipairs(models) do
+        if not ESPObjects[model] then
+            createESP(model)
+        end
+    end
+end
+
+--====================================================
+-- MAIN LOOP
+--====================================================
+
+RunService.RenderStepped:Connect(function(dt)
+    local camera = Workspace.CurrentCamera
+
+    if Humanoid and Humanoid.Parent then
+        Humanoid.WalkSpeed = S.WalkSpeed
+    end
+
+    UpButton.Visible = S.Fly
+    DownButton.Visible = S.Fly
+
+    -- AIM ASSIST
+    local target
+
+    if S.NPCAim then
+        target = findTarget(false)
+    elseif S.PlayerAim then
+        target = findTarget(true)
+    end
+
+    if target then
+        local root = getRoot(target)
+
+        if root then
+            local goal = CFrame.lookAt(
+                camera.CFrame.Position,
+                root.Position
+            )
+
+            local alpha
+
+            if S.SmoothCamera then
+                alpha = 1 - math.exp(
+                    -(S.AimStrength / 100 * 12) * dt
+                )
+            else
+                alpha = S.AimStrength / 100
+            end
+
+            camera.CFrame = camera.CFrame:Lerp(goal, alpha)
+        end
+    end
+
+    -- ESP
+    local active = S.BoxESP or S.HealthESP
+        or S.OutlineESP or S.TracerESP
+
+    scanTimer += dt
+
+    if active and scanTimer >= 1 then
+        scanTimer = 0
+        scanESP()
+    end
+
+    for model, data in pairs(ESPObjects) do
+        if not active or not model.Parent then
+            removeESP(model)
+        else
+            updateESP(model, data)
+        end
+    end
+end)
+
+--====================================================
+-- CLEANUP
+--====================================================
+
+local function cleanup()
+    stopFly()
+    setNoclip(false)
+
+    for model in pairs(ESPObjects) do
+        removeESP(model)
+    end
+
+    FlyGui:Destroy()
+    ESPGui:Destroy()
+end
+
+Player.CharacterRemoving:Connect(function()
+    stopFly()
+    setNoclip(false)
+end)
+
+Rayfield:Notify({
+    Title = "GPT HUB",
+    Content = "Universal Aim Assist loaded!",
+    Duration = 5
+})
+
+print("GPT HUB | UNIVERSAL AIM ASSIST loaded")
